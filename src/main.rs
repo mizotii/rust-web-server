@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // to do this, we create a listener and bind it to port 7878
     // todo: handle bind errors
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let pool = ThreadPool::build(4)?;
 
     // a stream represents an open connection between the client and the server.
     // we want to be able to read from and write to each stream
@@ -17,7 +18,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     for stream in listener.incoming() {
         // todo: handle stream unwrap errs
         let stream = stream.unwrap();
-        let pool = ThreadPool::build(4)?;
 
         pool.execute(|| {
             handle_connection(stream);
