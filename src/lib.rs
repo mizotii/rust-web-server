@@ -1,12 +1,23 @@
-use std::{error::Error, fmt, thread};
+use std::{error::Error, fmt, thread::{self, JoinHandle}, sync::{mpsc, Arc, Mutex}};
 
-#[derive(Debug)]
+//
 pub struct ThreadPool {
-    threads: Vec<thread::JoinHandle<()>>,
+    workers: Vec<Worker>,
+    sender: mpsc::Sender<Job>,
 }
+
+pub struct Worker {
+    id: usize,
+    thread: JoinHandle<()>,
+}
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+//
+
 #[derive(Debug)]
 pub struct PoolCreationError;
 
+//
 impl ThreadPool {
     /// Creates a new thread pool.
     /// 
@@ -17,12 +28,17 @@ impl ThreadPool {
     /// `build` function returns an error if size is not positive.
     pub fn build(size: usize) -> Result<ThreadPool, PoolCreationError> {
         if size > 0 {
-            let mut threads = Vec::with_capacity(size);
-            for _ in 0..size {
-                // todo: create threads and store in vector
+            let (sender, receiver) = mpsc::channel();
+
+            let receiver = Arc::new(Mutex::new(receiver));
+
+            let mut workers = Vec::with_capacity(size);
+
+            for id in 0..size {
+                workers.push(Worker::new(id, Arc::clone(&receiver)));
             }
 
-            Ok(ThreadPool { threads })
+            Ok(ThreadPool { workers, sender })
         } else {
             Err(PoolCreationError)
         }
@@ -32,9 +48,26 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
+        let job = Box::new(f);
 
+        self.sender.send(job).unwrap();
     }
 }
+
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let job = receiver.lock().unwrap().recv().unwrap();
+
+            println!("Worker {id} got a job; executing.");
+
+            job();
+        });
+        
+        Worker { id, thread }
+    }
+}
+//
 
 impl Error for PoolCreationError {}
 
