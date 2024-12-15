@@ -1,14 +1,14 @@
-use std::{error::Error, fmt, thread::{self, JoinHandle}, sync::{mpsc, Arc, Mutex}};
+use std::{error::Error, fmt, sync::{mpsc, Arc, Mutex}, thread::{self, JoinHandle, Thread}};
 
 //
 pub struct ThreadPool {
     workers: Vec<Worker>,
-    sender: mpsc::Sender<Job>,
+    sender: Option<mpsc::Sender<Job>>,
 }
 
 pub struct Worker {
     id: usize,
-    thread: JoinHandle<()>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
@@ -38,7 +38,7 @@ impl ThreadPool {
                 workers.push(Worker::new(id, Arc::clone(&receiver)));
             }
 
-            Ok(ThreadPool { workers, sender })
+            Ok(ThreadPool { workers, sender: Some(sender) })
         } else {
             Err(PoolCreationError)
         }
@@ -50,21 +50,43 @@ impl ThreadPool {
     {
         let job = Box::new(f);
 
-        self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+
+        for worker in &mut self.workers {
+            println!("shutting down worker {}", worker.id);
+            
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 }
 
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         let thread = thread::spawn(move || loop {
-            let job = receiver.lock().unwrap().recv().unwrap();
+            let message = receiver.lock().unwrap().recv();
 
-            println!("Worker {id} got a job; executing.");
-
-            job();
+            match message {
+                Ok(job) => {
+                    println!("worker {id} got a job. executing.");
+        
+                    job();
+                }
+                Err(_) => {
+                    println!("worker {id} disconnected, shutting down.");
+                    break;
+                }
+            }
         });
         
-        Worker { id, thread }
+        Worker { id, thread: Some(thread), }
     }
 }
 //
