@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
     }
 
+    println!("shutting down!");
     Ok(())
 }
 
